@@ -8,7 +8,9 @@ The common problem is state lifetime. A saved inode must keep its blocks alive a
 
 ## Filesystem snapshots: preserve a version without duplicating its contents
 
-A full filesystem copy duplicates unchanged bytes every time a version is saved. I separated the saved namespace from its contents: snapshot directories and inodes are rebuilt under `/snapshot/ID`, while ordinary files initially share their direct blocks, indirect pointer block, and indirect data blocks with the live tree. That sharing reduced incremental storage by **98.85% (262 → 3 blocks)** in a controlled save-and-append comparison with a stock-xv6 full copy; initial snapshot metadata cost another 18 blocks. [Measurement details](https://github.com/jaeunda/xv6-snapshot/blob/main/docs/measurements.md).
+A full filesystem copy duplicates unchanged bytes every time a version is saved. I separated the saved namespace from its contents: snapshot directories and inodes are rebuilt under `/snapshot/ID`, while ordinary files initially share their direct blocks, indirect pointer block, and indirect data blocks with the live tree. That sharing cut additional disk allocation in a controlled save-and-append comparison with a full copy on stock xv6. [Measurement details](https://github.com/jaeunda/xv6-snapshot/blob/main/docs/measurements.md).
+
+![Stock full copy: 262 additional blocks. Snapshot CoW: 3 blocks, 98.85% less incremental space. Initial metadata: 18 blocks.](docs/assets/storage-inline.svg)
 
 Persistent per-block reference counts make that sharing safe to release. `balloc` establishes the first reference; cloning adds references; `bfree` returns a block to the bitmap only when the last reference disappears. On a write, `bmap` copies a shared block before updating the live pointer. For indirect addressing, it also makes the shared pointer block private before changing an entry. Unaffected contents remain shared.
 
@@ -34,7 +36,9 @@ A fresh-boot stress demo showed frame records for two overlapping processes and 
 
 ## Stride scheduler: turn a process weight into execution order
 
-Round-robin gives runnable processes equal turns. I introduced ticket weights and `stride = 100000 / tickets`, then selected the runnable process with the smallest accumulated pass. Smaller strides advance more slowly and receive more frequent turns; equal passes break by PID. Timer accounting gives the demonstrated child workloads a CPU-tick budget. With 1:2:4 weights, maximum CPU-share error fell from **23.81 to 0.14 percentage points** against stock round-robin, averaged over five 300-tick runs per kernel. [Measurement details](https://github.com/jaeunda/xv6-stride-scheduler/blob/main/docs/measurements.md).
+Round-robin gives runnable processes equal turns. I introduced ticket weights and `stride = 100000 / tickets`, then selected the runnable process with the smallest accumulated pass. Smaller strides advance more slowly and receive more frequent turns; equal passes break by PID. Timer accounting gives the demonstrated child workloads a CPU-tick budget. A controlled 1:2:4 workload showed CPU shares closely following the requested weights compared with stock round-robin. [Measurement details](https://github.com/jaeunda/xv6-stride-scheduler/blob/main/docs/measurements.md).
+
+![Maximum CPU-share error: stock round-robin 23.81 percentage points; stride 0.14. Five 300-tick runs per kernel with 1:2:4 weights and one CPU.](docs/assets/share-inline.svg)
 
 ![Worked stride example shows weighted selection and the runnable-pass rebase with distance clamping.](docs/assets/stride-accounting.svg)
 
