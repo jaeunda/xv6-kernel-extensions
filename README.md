@@ -2,13 +2,17 @@
 
 **What has to change when a kernel gains saved filesystem versions, observable physical memory, or weighted CPU scheduling?** I extended the x86 xv6 kernel in separate projects to explore that question through working code, shell tools, and execution traces.
 
+![Measured against stock xv6: snapshots use 98.85% less incremental storage, 262 to 3 blocks; stride reduces maximum CPU-share error from 23.81 to 0.14 percentage points. Snapshot metadata costs 18 blocks upfront.](docs/assets/measured-results.svg)
+
+[Snapshot comparison and reproduction](https://github.com/jaeunda/xv6-snapshot/blob/main/docs/measurements.md) · [Scheduler comparison and reproduction](https://github.com/jaeunda/xv6-stride-scheduler/blob/main/docs/measurements.md)
+
 The common problem is state lifetime. A saved inode must keep its blocks alive after the live file changes. A reverse mapping and cached translation must respond when a page is removed. A scheduler must account for service without letting its counters grow indefinitely. Each extension puts that responsibility into the kernel paths that create, change, or release the relevant state.
 
 ![Independent xv6 extensions focus on filesystem snapshots, physical-memory observation, stride scheduling, and syscall interfaces.](docs/assets/kernel-overview.svg)
 
 ## Filesystem snapshots: preserve a version without duplicating its contents
 
-> **Measured:** **98.85% less incremental storage** than a stock-xv6 full copy: **3 vs 262 blocks** for one saved namespace and a one-byte append, with an additional **18-block initial metadata cost**. [Comparison and reproduction](https://github.com/jaeunda/os-p4-snapshot/blob/main/docs/measurements.md).
+**Measured: 262 → 3 additional blocks (98.85% less)** for one saved namespace and a one-byte append, plus 18 blocks of initial snapshot metadata. [Comparison and reproduction](https://github.com/jaeunda/xv6-snapshot/blob/main/docs/measurements.md).
 
 A full filesystem copy duplicates unchanged bytes every time a version is saved. I separated the saved namespace from its contents: snapshot directories and inodes are rebuilt under `/snapshot/ID`, while ordinary files initially share their direct blocks, indirect pointer block, and indirect data blocks with the live tree.
 
@@ -20,7 +24,7 @@ Create, rollback, and delete operate on the directory tree through recursive hel
 
 In the QEMU demo, a 6,150-byte file initially had the same direct and indirect block addresses as its snapshot. Appending changed the live indirect pointer and affected data-block address while all direct addresses stayed shared. Rollback restored the saved addresses; deletion removed that version; a restart continued with the next ID. These observations demonstrate the CoW mechanism; the separate comparison above measures additional disk allocation. First CoW overwrites without file growth have a documented pointer-persistence defect. Crash-atomic large-tree operations and consistent capture under arbitrary concurrent writers remain outside the established behavior.
 
-[Design, complete call graph, CoW and lifecycle diagrams, commands, and results →](https://github.com/jaeunda/os-p4-snapshot#readme)
+[Design, complete call graph, CoW and lifecycle diagrams, commands, and results →](https://github.com/jaeunda/xv6-snapshot#readme)
 
 ## Physical memory: connect allocation records to address mappings
 
@@ -32,11 +36,11 @@ The allocator's free list says whether a page is available, but cannot explain t
 
 A fresh-boot stress demo showed frame records for two overlapping processes and an empty filtered dump after release. The translation fixture recorded three hits and four misses, then correctly rejected the released heap address. It also exposed limits: user code pages are writable in this xv6 tree, and fork copies physical pages, so fixtures expecting read-only code or a shared parent frame fail. The source and detailed write-up distinguish allocation context from mapping ownership and explain the remaining coherence boundaries.
 
-[Frame tracking, full memory call graph, translation design, and test findings →](https://github.com/jaeunda/os-p3-pageframe#readme)
+[Frame tracking, full memory call graph, translation design, and test findings →](https://github.com/jaeunda/xv6-pageframe#readme)
 
 ## Stride scheduler: turn a process weight into execution order
 
-> **Measured:** with 1:2:4 weights, maximum CPU-share error averaged **0.14 percentage points**, compared with **23.81** on stock round-robin, over five 300-tick runs per kernel. [Comparison and reproduction](https://github.com/jaeunda/os-p2-scheduler/blob/main/docs/measurements.md).
+**Measured: 23.81 → 0.14 percentage points of maximum CPU-share error**, averaged over five 300-tick runs per kernel with 1:2:4 weights. [Comparison and reproduction](https://github.com/jaeunda/xv6-stride-scheduler/blob/main/docs/measurements.md).
 
 Round-robin gives runnable processes equal turns. I introduced ticket weights and `stride = 100000 / tickets`, then selected the runnable process with the smallest accumulated pass. Smaller strides advance more slowly and receive more frequent turns; equal passes break by PID. Timer accounting gives the demonstrated child workloads a CPU-tick budget.
 
@@ -44,13 +48,13 @@ Round-robin gives runnable processes equal turns. I introduced ticket weights an
 
 The five-workload demo showed equal-ticket children alternating to their budgets, unequal weights changing selection frequency, and low-ticket cases triggering rebasing. Rebase subtracts a runnable baseline and clamps large distances to 7,500. The clamp discards relative-distance information, so these traces do not establish exact long-run proportional fairness. The detailed README includes both report diagrams and explains the prebuilt demo executables.
 
-[Scheduling policy, timer/context-switch call graph, and execution traces →](https://github.com/jaeunda/os-p2-scheduler#readme)
+[Scheduling policy, timer/context-switch call graph, and execution traces →](https://github.com/jaeunda/xv6-stride-scheduler#readme)
 
 ## Syscall interfaces: expose a small operation through the whole boundary
 
-I added `hello_number` and `get_procinfo` to exercise integer arguments, dispatch, process-table lookup, and user-buffer copying. The process handler fills a local record while holding `ptable.lock`, releases the lock, then copies the result to the caller. The demo verifies integer return values and missing-PID handling; its current display-format defect is documented in the [process-inspection README](https://github.com/jaeunda/os-p1-syscall#readme).
+I added `hello_number` and `get_procinfo` to exercise integer arguments, dispatch, process-table lookup, and user-buffer copying. The process handler fills a local record while holding `ptable.lock`, releases the lock, then copies the result to the caller. The demo verifies integer return values and missing-PID handling; its current display-format defect is documented in the [process-inspection README](https://github.com/jaeunda/xv6-syscall#readme).
 
-The earlier [lseek extension](https://github.com/jaeunda/xv6-syscall#readme) updates the existing open-file offset using `SEEK_SET`, `SEEK_CUR`, or `SEEK_END`. Its small positional-edit demo changes `Hello SSU` to `Hello World` through the ordinary write path. Both original READMEs include custom SVGs and implementation boundaries.
+The earlier [lseek extension](https://github.com/jaeunda/xv6-lseek#readme) updates the existing open-file offset using `SEEK_SET`, `SEEK_CUR`, or `SEEK_END`. Its small positional-edit demo changes `Hello SSU` to `Hello World` through the ordinary write path. Both original READMEs include custom SVGs and implementation boundaries.
 
 ## Explore the projects
 
@@ -58,10 +62,10 @@ Each submodule is an independent xv6 tree. The extensions are not combined into 
 
 | Project | What I implemented | Detailed README |
 | --- | --- | --- |
-| Filesystem snapshots | Block CoW, persistent references, saved trees, rollback and deletion | [os-p4-snapshot](https://github.com/jaeunda/os-p4-snapshot#readme) |
-| Physical memory | Frame allocation records, forward/reverse mapping, software translation cache | [os-p3-pageframe](https://github.com/jaeunda/os-p3-pageframe#readme) |
-| Stride scheduler | Minimum-pass selection, ticket weights, rebasing, child tick budgets | [os-p2-scheduler](https://github.com/jaeunda/os-p2-scheduler#readme) |
-| Syscall interfaces | Process records and integer calls; an earlier file-positioning extension | [os-p1-syscall](https://github.com/jaeunda/os-p1-syscall#readme) · [xv6-syscall / lseek](https://github.com/jaeunda/xv6-syscall#readme) |
+| Filesystem snapshots | Block CoW, persistent references, saved trees, rollback and deletion | [xv6-snapshot](https://github.com/jaeunda/xv6-snapshot#readme) |
+| Physical memory | Frame allocation records, forward/reverse mapping, software translation cache | [xv6-pageframe](https://github.com/jaeunda/xv6-pageframe#readme) |
+| Stride scheduler | Minimum-pass selection, ticket weights, rebasing, child tick budgets | [xv6-stride-scheduler](https://github.com/jaeunda/xv6-stride-scheduler#readme) |
+| Syscall interfaces | Process records and integer calls; an earlier file-positioning extension | [xv6-syscall](https://github.com/jaeunda/xv6-syscall#readme) · [xv6-lseek](https://github.com/jaeunda/xv6-lseek#readme) |
 
 The [Linux observation notes](docs/linux-observations.md) connect the initial process, memory, descriptor, and disk measurements to these kernel questions. Original Word reports and extracted screenshots are not stored in the repositories. Figures use a shared visual style and outlined Noto Sans so their typography is consistent on GitHub; the [font license](docs/assets/NotoSans-OFL.txt) is included.
 
