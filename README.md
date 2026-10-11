@@ -2,19 +2,13 @@
 
 **What has to change when a kernel gains saved filesystem versions, observable physical memory, or weighted CPU scheduling?** I extended the x86 xv6 kernel in separate projects to explore that question through working code, shell tools, and execution traces.
 
-![Measured against stock xv6: snapshots use 98.85% less incremental storage, 262 to 3 blocks; stride reduces maximum CPU-share error from 23.81 to 0.14 percentage points. Snapshot metadata costs 18 blocks upfront.](docs/assets/measured-results.svg)
-
-[Snapshot comparison and reproduction](https://github.com/jaeunda/xv6-snapshot/blob/main/docs/measurements.md) · [Scheduler comparison and reproduction](https://github.com/jaeunda/xv6-stride-scheduler/blob/main/docs/measurements.md)
-
 The common problem is state lifetime. A saved inode must keep its blocks alive after the live file changes. A reverse mapping and cached translation must respond when a page is removed. A scheduler must account for service without letting its counters grow indefinitely. Each extension puts that responsibility into the kernel paths that create, change, or release the relevant state.
 
 ![Independent xv6 extensions focus on filesystem snapshots, physical-memory observation, stride scheduling, and syscall interfaces.](docs/assets/kernel-overview.svg)
 
 ## Filesystem snapshots: preserve a version without duplicating its contents
 
-**Measured: 262 → 3 additional blocks (98.85% less)** for one saved namespace and a one-byte append, plus 18 blocks of initial snapshot metadata. [Comparison and reproduction](https://github.com/jaeunda/xv6-snapshot/blob/main/docs/measurements.md).
-
-A full filesystem copy duplicates unchanged bytes every time a version is saved. I separated the saved namespace from its contents: snapshot directories and inodes are rebuilt under `/snapshot/ID`, while ordinary files initially share their direct blocks, indirect pointer block, and indirect data blocks with the live tree.
+A full filesystem copy duplicates unchanged bytes every time a version is saved. I separated the saved namespace from its contents: snapshot directories and inodes are rebuilt under `/snapshot/ID`, while ordinary files initially share their direct blocks, indirect pointer block, and indirect data blocks with the live tree. That sharing reduced incremental storage by **98.85% (262 → 3 blocks)** in a controlled save-and-append comparison with a stock-xv6 full copy; initial snapshot metadata cost another 18 blocks. [Measurement details](https://github.com/jaeunda/xv6-snapshot/blob/main/docs/measurements.md).
 
 Persistent per-block reference counts make that sharing safe to release. `balloc` establishes the first reference; cloning adds references; `bfree` returns a block to the bitmap only when the last reference disappears. On a write, `bmap` copies a shared block before updating the live pointer. For indirect addressing, it also makes the shared pointer block private before changing an entry. Unaffected contents remain shared.
 
@@ -22,7 +16,7 @@ Persistent per-block reference counts make that sharing safe to release. `balloc
 
 Create, rollback, and delete operate on the directory tree through recursive helpers. Saved copies receive read-only modes; rollback rebuilds writable live copies while retaining other snapshots. The superblock preserves the next snapshot ID across normal reboots, and the extended image builder initializes `/snapshot/.brefcnt` alongside the filesystem.
 
-In the QEMU demo, a 6,150-byte file initially had the same direct and indirect block addresses as its snapshot. Appending changed the live indirect pointer and affected data-block address while all direct addresses stayed shared. Rollback restored the saved addresses; deletion removed that version; a restart continued with the next ID. These observations demonstrate the CoW mechanism; the separate comparison above measures additional disk allocation. First CoW overwrites without file growth have a documented pointer-persistence defect. Crash-atomic large-tree operations and consistent capture under arbitrary concurrent writers remain outside the established behavior.
+In the QEMU demo, a 6,150-byte file initially had the same direct and indirect block addresses as its snapshot. Appending changed the live indirect pointer and affected data-block address while all direct addresses stayed shared. Rollback restored the saved addresses; deletion removed that version; a restart continued with the next ID. These observations demonstrate the CoW mechanism; the controlled comparison measures additional disk allocation. First CoW overwrites without file growth have a documented pointer-persistence defect. Crash-atomic large-tree operations and consistent capture under arbitrary concurrent writers remain outside the established behavior.
 
 [Design, complete call graph, CoW and lifecycle diagrams, commands, and results →](https://github.com/jaeunda/xv6-snapshot#readme)
 
@@ -40,9 +34,7 @@ A fresh-boot stress demo showed frame records for two overlapping processes and 
 
 ## Stride scheduler: turn a process weight into execution order
 
-**Measured: 23.81 → 0.14 percentage points of maximum CPU-share error**, averaged over five 300-tick runs per kernel with 1:2:4 weights. [Comparison and reproduction](https://github.com/jaeunda/xv6-stride-scheduler/blob/main/docs/measurements.md).
-
-Round-robin gives runnable processes equal turns. I introduced ticket weights and `stride = 100000 / tickets`, then selected the runnable process with the smallest accumulated pass. Smaller strides advance more slowly and receive more frequent turns; equal passes break by PID. Timer accounting gives the demonstrated child workloads a CPU-tick budget.
+Round-robin gives runnable processes equal turns. I introduced ticket weights and `stride = 100000 / tickets`, then selected the runnable process with the smallest accumulated pass. Smaller strides advance more slowly and receive more frequent turns; equal passes break by PID. Timer accounting gives the demonstrated child workloads a CPU-tick budget. With 1:2:4 weights, maximum CPU-share error fell from **23.81 to 0.14 percentage points** against stock round-robin, averaged over five 300-tick runs per kernel. [Measurement details](https://github.com/jaeunda/xv6-stride-scheduler/blob/main/docs/measurements.md).
 
 ![Worked stride example shows weighted selection and the runnable-pass rebase with distance clamping.](docs/assets/stride-accounting.svg)
 
