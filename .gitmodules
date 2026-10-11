@@ -9,7 +9,7 @@
 	url = git@github.com:jaeunda/os-p2-scheduler.git
 [submodule "os-p3-tracking-pageframe"]
 	path = xv6-tracking-pageframe
-	url = git@github.com:jaeunda/os-p3-tracking-pageframe.git
+	url = git@github.com:jaeunda/os-p3-pageframe.git
 [submodule "os-p4-snapshot"]
 	path = xv6-snapshot
 	url = git@github.com:jaeunda/os-p4-snapshot.git
